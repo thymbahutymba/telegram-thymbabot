@@ -1,5 +1,6 @@
-# Don't include json config
+# Don't include some files
 config.json
+thymbabot.log
 
 # Don't include cache
 __pycache__/**
