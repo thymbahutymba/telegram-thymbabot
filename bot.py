@@ -109,7 +109,6 @@ class core:
 			try:
 				query = "INSERT INTO spese(price, description, data_reg, user_id)"
 				query += "values({}, '{}', CURRENT_DATE, {});".format(price, desc, c_id)
-				print(query)
 				cursor.execute(query)
 				connect.commit()
 				logging.info("Insert into table spese from {}: {} {}.".format(c_id, price, desc))
