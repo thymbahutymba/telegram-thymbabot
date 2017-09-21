@@ -6,7 +6,6 @@ from sqlite3 import Error
 from bot import *
 
 def main():
-		
 	thymba = core()
 	thymba.start()
 
