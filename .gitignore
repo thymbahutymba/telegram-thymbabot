@@ -1,0 +1,8 @@
+# Don't include json config
+config.json
+
+# Don't include cache
+__pycache__/**
+
+# Don't include personal database
+casa.db
