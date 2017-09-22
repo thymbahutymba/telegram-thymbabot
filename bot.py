@@ -1,12 +1,12 @@
 import json, logging, sqlite3
-from telegram.ext import Updater, CommandHandler, Filters, MessageHandler, ConversationHandler
+from telegram.ext import Updater, CommandHandler, Filters, MessageHandler, CallbackQueryHandler
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlite3 import Error
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO, filename='thymbabot.log')
 	
 try:
-	connect = sqlite3.connect('casa.db', check_same_thread=False)
+	connect = sqlite3.connect('casa.sqlite3', check_same_thread=False)
 	cursor = connect.cursor()
 except Error as e:
 	print(e)
@@ -47,6 +47,8 @@ class core:
 			self.dispatcher.add_handler(CommandHandler('help', self.help_command))
 			self.dispatcher.add_handler(CommandHandler('register', self.register_command))
 			self.dispatcher.add_handler(CommandHandler('shop', self.shop_command, pass_args=True))
+			self.dispatcher.add_handler(CommandHandler('print', self.print_command))
+			self.dispatcher.add_handler(CallbackQueryHandler(self.button))
 		except Exception as ecc:
 			logging.error('error: ' + str(ecc))
 			pass
@@ -92,7 +94,8 @@ class core:
 		message_help += "/ping - ping the bot\n"
 		message_help += "/help - help command\n"
 		message_help += "/register - register your user\n"
-		message_help += "/shop - add some buy."
+		message_help += "/shop - add some purchase.\n"
+		message_help += "/print - show something."
 		bot.send_message(chat_id=update.message.chat_id, text=message_help)
 		
 	def shop_command(self, bot, update, args):
@@ -102,8 +105,7 @@ class core:
 		self.add_shop(bot, update, update.message.chat_id, price, desc)
 	
 	def add_shop(self, bot, update, c_id, price, desc):
-		result = self.check_register(c_id)
-		if result == False:
+		if self.check_register(c_id) == False:
 			bot.send_message(chat_id=c_id, text="You are not registered yet, type /register to do so.")
 		else:
 			try:
@@ -123,3 +125,44 @@ class core:
 		cursor.execute(query)
 		if cursor.fetchone()[0] == 0:
 			return False
+		
+	def total_command(self, bot, update):
+		if self.check_register(update.message.chat_id) == False:
+			msg = "You are not in my database, you have not bought anything."
+			bot.send_message(chat_id=update.message.chat_id, text=msg)
+		else:
+			query = "SELECT sum(price) FROM spese WHERE user_id = {}".format(update.message.chat_id)
+			cursor.execute(query)
+			total = cursor.fetchone()[0]
+			user = update.message.from_user.username
+			msg = "Total amount of purchases for {} is: {}€".format(user,total)
+			bot.send_message(chat_id=update.message.chat_id, text = msg)
+
+	def print_command(self, bot, update):
+		keyboard = [[InlineKeyboardButton("Shop", callback_data='1'),
+			   InlineKeyboardButton("Option2", callback_data='2')]]
+		
+		reply_markup = InlineKeyboardMarkup(keyboard)
+
+		update.message.reply_text('Choose what you need:', reply_markup=reply_markup)
+		
+		
+	def button(self, bot, update):
+		"""
+		query = update.callback_query
+		print(query)
+		if int(query.data) == 1:
+			print(query.data)
+			bot.edit_message_text(text="Selected option: %s" % query.data,
+                          chat_id=query.message.chat_id,
+                          message_id=query.message.message_id)
+		"""
+		try:
+			if int(update.callback_query.data) == 1:
+				print("callback_data 1")
+				query = "SELECT * FROM spese WHERE user_id={}".format(update.callback_query.message.chat_id)
+				cursor.execute(query)
+				text = cursor.fetchall()
+				print(text)
+		except Exception as ecc:
+			logging.error("Error: " + str(ecc))
