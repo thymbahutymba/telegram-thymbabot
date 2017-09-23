@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS expense(
+	id integer PRIMARY KEY AUTOINCREMENT,
+	price float NOT NULL,
+	description text NOT NULL,
+	data_reg date NOT NULL,
+	user_id NOT NULL,
+	FOREIGN KEY (user_id) REFERENCES users(id)
+);

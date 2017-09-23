@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS user(
+	id integer PRIMARY KEY,
+	name string NOT NULL
+);
