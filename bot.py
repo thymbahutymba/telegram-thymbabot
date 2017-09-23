@@ -1,7 +1,8 @@
-import json, logging, sqlite3
+import json, logging, sqlite3, os
 from telegram.ext import Updater, CommandHandler, Filters, MessageHandler, CallbackQueryHandler
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlite3 import Error
+from prettytable import PrettyTable
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO, filename='thymbabot.log')
 	
@@ -9,7 +10,7 @@ try:
 	connect = sqlite3.connect('casa.sqlite3', check_same_thread=False)
 	cursor = connect.cursor()
 except Error as e:
-	print(e)
+	logging.error("Error to connect database: " + str(e))
 	pass
 
 class core:
@@ -17,25 +18,19 @@ class core:
 	log = None
 	
 	def __init__(self):
+		
 		with open('config.json') as config_file:
 			self.log = None
 			self.cfg = json.load(config_file)
-
-		sql_create_table_users = "CREATE TABLE IF NOT EXISTS users(id integer PRIMARY KEY, name string NOT NULL);"
-		
-		sql_create_table_spese = "CREATE TABLE IF NOT EXISTS spese(id integer PRIMARY KEY AUTOINCREMENT,"
-		sql_create_table_spese += "price float NOT NULL,"
-		sql_create_table_spese += "description text NOT NULL,"
-		sql_create_table_spese += "data_reg date NOT NULL,"
-		sql_create_table_spese += "user_id NOT NULL,"
-		sql_create_table_spese += "FOREIGN KEY (user_id) REFERENCES users(id));"
-		
-		if connect is not None:
-			connect.execute(sql_create_table_users)
-			connect.execute(sql_create_table_spese)
-		else:
-			logging.error("Connection to database failed")
 			
+		for tab_file in os.listdir('tables'):
+			with open('tables/'+tab_file) as tab:
+				if connect is not None:
+					t = tab.read()
+					cursor.execute(t)
+				else:
+					logging.error("Connection to database failed")
+					break
 	def start(self):
 		try:
 			self.updater = Updater(token=self.cfg.get('token'), workers=10)
@@ -46,7 +41,7 @@ class core:
 			self.dispatcher.add_handler(CommandHandler('ping', self.ping_command))
 			self.dispatcher.add_handler(CommandHandler('help', self.help_command))
 			self.dispatcher.add_handler(CommandHandler('register', self.register_command))
-			self.dispatcher.add_handler(CommandHandler('shop', self.shop_command, pass_args=True))
+			self.dispatcher.add_handler(CommandHandler('expense', self.expense_command, pass_args=True))
 			self.dispatcher.add_handler(CommandHandler('print', self.print_command))
 			self.dispatcher.add_handler(CallbackQueryHandler(self.button))
 		except Exception as ecc:
@@ -63,10 +58,10 @@ class core:
 		c_username = update.message.from_user.username 
 		try:
 			if connect is not None:
-				insert_query = "SELECT count(*) FROM users WHERE id = {};".format(c_id)
+				insert_query = "SELECT count(*) FROM user WHERE id = {};".format(c_id)
 				cursor.execute(insert_query)
 				if cursor.fetchone()[0] == 0:
-					query = "INSERT INTO users values({}, '{}');".format(c_id, c_username)
+					query = "INSERT INTO user values({}, '{}');".format(c_id, c_username)
 					cursor.execute(query)
 					connect.commit()
 					bot.send_message(chat_id=c_id, text="Done.")
@@ -94,34 +89,60 @@ class core:
 		message_help += "/ping - ping the bot\n"
 		message_help += "/help - help command\n"
 		message_help += "/register - register your user\n"
-		message_help += "/shop - add some purchase.\n"
+		message_help += "/expense - add some purchase. <price> <description>\n"
 		message_help += "/print - show something."
 		bot.send_message(chat_id=update.message.chat_id, text=message_help)
 		
-	def shop_command(self, bot, update, args):
+	def expense_command(self, bot, update, args):
 		string = update.message.text.split(' ',2)
-		price = float(args[0])
-		desc = " ".join(args[1:])
-		self.add_shop(bot, update, update.message.chat_id, price, desc)
+		if not args or len(args)<2:
+			bot.send_message(chat_id=update.message.chat_id, text="You forgot price and/or description.")
+		else:
+			price = float(args[0])
+			desc = " ".join(args[1:])
+			print(price)
+			print(desc)
+			if price is None or desc is None:
+				update.reply_message("You have not set price or description.")
+			else:
+				last_id = self.add_expense(bot, update, update.message.chat_id, price, desc)
+				self.add_payment(update.message.chat_id, last_id, price)
 	
-	def add_shop(self, bot, update, c_id, price, desc):
+	def add_expense(self, bot, update, c_id, price, desc):
 		if self.check_register(c_id) == False:
 			bot.send_message(chat_id=c_id, text="You are not registered yet, type /register to do so.")
 		else:
 			try:
-				query = "INSERT INTO spese(price, description, data_reg, user_id)"
+				query = "INSERT INTO expense(price, description, data_reg, user_id)"
 				query += "values({}, '{}', CURRENT_DATE, {});".format(price, desc, c_id)
 				cursor.execute(query)
 				connect.commit()
-				logging.info("Insert into table spese from {}: {} {}.".format(c_id, price, desc))
+				logging.info("Insert into table expense from {}: {} {}.".format(c_id, price, desc))
 				bot.send_message(chat_id=c_id, text="Insert completed.")
+				query2 = "SELECT LAST_INSERT_ROWID()"
+				cursor.execute(query2)
+				return cursor.fetchone()[0]
 			except Exception as e:
-				logging.error("Insert into spese failed." + str(e))
-				bot.send_message(chat_id=c_id, text="Insert into spese failed.")
+				logging.error("Insert into expense failed." + str(e))
+				bot.send_message(chat_id=c_id, text="Insert into expense failed.")
 				pass
-			
+	
+	def add_payment(self, c_id, e_id, price):
+		try:
+			query = "SELECT count(*) FROM user"
+			cursor.execute(query)
+			own_price = float(price/(cursor.fetchone()[0]))
+			print(own_price)
+			query2 = "INSERT INTO payment(expense_id, user_id, import) values({}, {}, {})".format(e_id, c_id, own_price)
+			cursor.execute(query2)
+			connect.commit()
+			logging.info("Insert into table payment.")
+		except Exception as e:
+			logging.error("Insert into payment failed." + str(e))
+			pass
+	
 	def check_register(self, c_id):
-		query = "SELECT count(*) FROM users WHERE id={}".format(c_id)
+		query = "SELECT count(*) FROM user WHERE id={}".format(c_id)
 		cursor.execute(query)
 		if cursor.fetchone()[0] == 0:
 			return False
@@ -131,7 +152,7 @@ class core:
 			msg = "You are not in my database, you have not bought anything."
 			bot.send_message(chat_id=update.message.chat_id, text=msg)
 		else:
-			query = "SELECT sum(price) FROM spese WHERE user_id = {}".format(update.message.chat_id)
+			query = "SELECT sum(price) FROM expense WHERE user_id = {}".format(update.message.chat_id)
 			cursor.execute(query)
 			total = cursor.fetchone()[0]
 			user = update.message.from_user.username
@@ -139,8 +160,9 @@ class core:
 			bot.send_message(chat_id=update.message.chat_id, text = msg)
 
 	def print_command(self, bot, update):
-		keyboard = [[InlineKeyboardButton("Shop", callback_data='1'),
-			   InlineKeyboardButton("Option2", callback_data='2')]]
+		keyboard = [[InlineKeyboardButton("Expense", callback_data='1'),
+			   InlineKeyboardButton("Payments", callback_data='2'),
+			   InlineKeyboardButton("Users", callback_data='3')]]
 		
 		reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -148,21 +170,32 @@ class core:
 		
 		
 	def button(self, bot, update):
-		"""
-		query = update.callback_query
-		print(query)
-		if int(query.data) == 1:
-			print(query.data)
-			bot.edit_message_text(text="Selected option: %s" % query.data,
-                          chat_id=query.message.chat_id,
-                          message_id=query.message.message_id)
-		"""
 		try:
+			c_id = update.callback_query.message.chat_id
 			if int(update.callback_query.data) == 1:
-				print("callback_data 1")
-				query = "SELECT * FROM spese WHERE user_id={}".format(update.callback_query.message.chat_id)
-				cursor.execute(query)
-				text = cursor.fetchall()
-				print(text)
+				query = "SELECT * FROM expense WHERE user_id={}".format(c_id)
+				table = PrettyTable(["ID", "Price", "Description", "Data Reg", "User"])
+				tmp = "expense"
+			elif int(update.callback_query.data) == 2:
+				query = "SELECT * FROM payment WHERE user_id={}".format(c_id)
+				table = PrettyTable(["Expense", "User", "Payment Date", "Import", "Paid?"])
+				tmp = "payment"
+			elif int(update.callback_query.data) == 3:
+				query = "SELECT * FROM user"
+				table = PrettyTable(["ID", "Name"])
+				tmp = "user"
+			
+			cursor.execute(query)
+			if cursor.fetchone() is None:
+				text = "There are not results for {}.".format(tmp)
+				bot.send_message(chat_id=c_id, text = text)
+			else:
+				cursor.execute(query) #refresh result set
+				for res in cursor.fetchall():
+					table.add_row(res)
+				s = "```\n"
+				s += table.get_string()
+				s += "```"
+				bot.send_message(chat_id=c_id, text = s, parse_mode='MARKDOWN')
 		except Exception as ecc:
 			logging.error("Error: " + str(ecc))

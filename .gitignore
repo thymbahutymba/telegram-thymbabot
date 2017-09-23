@@ -6,4 +6,4 @@ thymbabot.log
 __pycache__/**
 
 # Don't include personal database
-casa.db
+casa.sqlite3
