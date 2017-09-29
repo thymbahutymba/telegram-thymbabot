@@ -5,7 +5,7 @@ from sqlite3 import Error
 from prettytable import PrettyTable
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',level=logging.INFO, filename='thymbabot.log')
-CHOOSING, TAKE_DATA, TAKE_INFORMATION, SET_PAYMENT = range(4)
+CHOOSING, TAKE_DATA, TAKE_INFORMATION, SET_PAYMENT, USER_PAYMENT = range(5)
 
 class core:
 	cfg = None
@@ -148,10 +148,11 @@ class core:
 		insert_handler = ConversationHandler(
 			entry_points=[CommandHandler('insert', self.insert_command)],
 			states={
-				CHOOSING: [RegexHandler('^(Expense|PaymentNoWork)$', self.first_choice, pass_user_data=True)],
+				CHOOSING: [RegexHandler('^(Expense|Payment)$', self.first_choice, pass_user_data=True)],
 				TAKE_INFORMATION: [RegexHandler('^(Price|Description|Debit)$', self.take_information, pass_user_data=True)],
 				TAKE_DATA: [MessageHandler(Filters.text, self.take_data, pass_user_data=True)],
-				SET_PAYMENT: [MessageHandler(Filters.text, self.set_payment, pass_user_data=True)]
+				SET_PAYMENT: [MessageHandler(Filters.text, self.set_payment, pass_user_data=True)],
+				USER_PAYMENT: [MessageHandler(Filters.text, self.user_payment, pass_user_data=True)]
 				},
 			fallbacks = [RegexHandler('^(Submit|Cancel)$', self.end_action, pass_user_data=True)],
 		)
@@ -175,11 +176,8 @@ class core:
 			pass
 
 	def simple_2choice(self, user_data):
-		if user_data['choice'] == 'Expense':
-			expense_keyboard = [['Price', 'Description'], ['Debit', 'Cancel', 'Submit']]
-			markup = ReplyKeyboardMarkup(expense_keyboard, one_time_keyboard=True)
-		#elif user_data == 'Payment':
-			#markup...
+		expense_keyboard = [['Price', 'Description'], ['Debit', 'Cancel', 'Submit']]
+		markup = ReplyKeyboardMarkup(expense_keyboard, one_time_keyboard=True)
 		return markup
 
 	def is_float(self, s):
@@ -194,20 +192,46 @@ class core:
 		if not self.check_register(bot, update):
 			return ConversationHandler.END
 		else:
-			action_keyboard = [['Expense', 'PaymentNotWork'], ['Cancel']]
+			action_keyboard = [['Expense', 'Payment'], ['Cancel']]
 			markup = ReplyKeyboardMarkup(action_keyboard, one_time_keyboard=True)
 			update.message.reply_text("Choice what you want to do.", reply_markup=markup)
 			return CHOOSING
 
 	def first_choice(self, bot, update, user_data):
+		print(update.message.text)
 		user_data['choice'] = update.message.text
 		if user_data['choice'] == 'Expense':
 			user_data['Price'] = None
 			user_data['Description'] = None
-		markup = self.simple_2choice(user_data)
-		text = "Which information do you want to add?\nRemember that if you made a mistake, you can re-enter the data before clicking Submit."
-		update.message.reply_text(text, reply_markup=markup)
-		return TAKE_INFORMATION
+			markup = self.simple_2choice(user_data)
+			text = "Which information do you want to add?\nRemember that if you made a mistake, you can re-enter the data before clicking Submit."
+			update.message.reply_text(text, reply_markup=markup)
+			return TAKE_INFORMATION
+		else:
+			print("1")
+			markup = self.payment_keyboard(update.message.chat_id)
+			text = "Who did you pay?"
+			update.message.reply_text(text, reply_markup=markup)
+			return USER_PAYMENT
+
+	def payment_keyboard(self, c_id):
+		print("2")
+		query = "SELECT DISTINCT U.name "
+		query += "FROM payment P inner join expense E on P.expense_id=E.id "
+		query += "inner join user U on E.user_id=U.id "
+		query += "WHERE P.user_id={}".format(c_id)
+		print(query)
+		self.cursor.execute(query)
+		user = []
+		for row in self.cursor:
+			print(row[0])
+			user.append(row[0])
+
+		#TODO back button
+
+		keyboard = [user, ['Cancel']]
+		markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+		return markup
 
 	def user_keyboard(self, update, user_data):
 		query = "SELECT name FROM user"
@@ -217,6 +241,7 @@ class core:
 		for row in self.cursor:
 			if row[0] not in user_data:
 				user.append(row[0])
+		print(user)
 		keyboard = [user, ['Back', 'Cancel', 'Submit']]
 		markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
 		return markup
@@ -263,11 +288,12 @@ class core:
 
 	def end_action(self, bot, update, user_data):
 		if update.message.text =='Cancel':
-			update.message.reply_text("All information deleted", reply_markup=ReplyKeyboardRemove())
-			del user_data
+			update.message.reply_text("All information deleted.", reply_markup=ReplyKeyboardRemove())
+			user_data.clear()
 			return ConversationHandler.END
-		if user_data['Price'] is None or user_data['Description'] is None:
+		elif user_data['Price'] is None or user_data['Description'] is None:
 			update.message.reply_text("You forgot to give me some information, I'm sorry!", reply_markup=ReplyKeyboardRemove())
+			user_data.clear()
 			return ConversationHandler.END
 		else:
 			msg = "The added information are:\nPrice - {}€ \nDescription - {}\n".format(user_data['Price'], user_data['Description'])
@@ -282,6 +308,7 @@ class core:
 				msg += "- " + str(row[0]) + "\n"
 			self.add_expense(bot, update, user_data['Price'], user_data['Description'], user)
 			update.message.reply_text(msg, reply_markup=ReplyKeyboardRemove())
+			user_data.clear()
 			return ConversationHandler.END
 
 	def add_expense(self, bot, update, price, desc, user):
@@ -297,7 +324,7 @@ class core:
 			self.add_payment(e_id, price, user)
 		except Exception as e:
 			logging.error("Insert into expense failed. Error: "+ str(e))
-			update.message.reply_text(chat_id=update.message.chat_id, text="Insert into expense failed.")
+			update.message.reply_text("Insert into expense failed.")
 			pass
 
 	def add_payment(self, e_id, price, user):
@@ -313,4 +340,41 @@ class core:
 			logging.info("Insert into table payment completed.")
 		except Exception as e:
 			logging.error("Insert into payment failed. Error: " + str(e))
+			update.message.reply_text("Insert into payment failed.")
 			pass
+
+	def user_payment(self, bot, update, user_data):
+		user_data['user']=update.message.text
+		query = "SELECT E.data_reg as Data, P.import as Import, E.description as Description "
+		query += "FROM payment P inner join expense E on P.expense_id=E.id "
+		query += "inner join user U on U.id=P.user_id "
+		query += "WHERE U.name='{}' ".format(user_data['user'])
+		query += "AND E.user_id={} ".format(update.message.chat_id)
+		query += "AND P.paid='false' "
+		query += "ORDER BY E.data_reg DESC"
+		print(query)
+		self.cursor.execute(query)
+
+		#DEBUG MESSAGE
+
+		table = PrettyTable(['Data', 'Import', 'Description'])
+		for row in self.cursor.fetchall():
+			table.add_row(row)
+		s = "Payments due by {} are:".format(user_data['user'])
+		s+="```\n"
+		s+=table.get_string()
+		s+="```"
+		print(s)
+		bot.send_message(chat_id=update.message.chat_id, text=s, parse_mode='MARKDOWN')
+
+		#TODO check if table is empty
+
+		self.cursor.execute(query)
+		payment = []
+		for row in self.cursor:
+			payment.add_row(row)
+		keyboard = [payment, ['Cancel']]
+		markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+		update.message.reply_text("Which payment you want update?", reply_markup=markup)
+		#return SOME
+		return ConversationHandler.END
