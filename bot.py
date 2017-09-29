@@ -99,7 +99,7 @@ class core:
 		if self.check_register(bot, update):
 			query = "SELECT sum(price) FROM expense WHERE user_id = {}".format(update.message.chat_id)
 			self.cursor.execute(query)
-			total = cursor.fetchone()[0]
+			total = self.cursor.fetchone()[0]
 			user = update.message.from_user.username
 			msg = "Total amount of expense for {} is: {}€".format(user,total)
 			self.reply_message(bot, update, msg)
