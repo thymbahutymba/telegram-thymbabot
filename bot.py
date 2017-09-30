@@ -217,8 +217,8 @@ class core:
 		query = "SELECT DISTINCT U.name "
 		query += "FROM payment P INNER JOIN expense E on P.expense_id=E.id "
 		query += "INNER JOIN user U on E.user_id=U.id "
-		query += "WHERE P.user_id=?"
-		self.cursor.execute(query, (c_id))
+		query += "WHERE P.user_id=:chat_id"
+		self.cursor.execute(query, {"chat_id": c_id})
 		user = []
 		for row in self.cursor:
 			user.append(row[0])
