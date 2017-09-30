@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS suspend(
+CREATE TABLE IF NOT EXISTS pending(
 	master_id integer NOT NULL,
 	debtor_id integer NOT NULL,
   expense_id integer NOT NULL,

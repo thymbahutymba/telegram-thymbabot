@@ -341,29 +341,36 @@ class core:
 		user_data['user']=update.message.text
 		query = "SELECT E.data_reg as Data, round(P.import, 2) as Import, E.description as Description, P.user_id, P.expense_id "
 		query += "FROM payment P INNER JOIN expense E on P.expense_id=E.id "
-		query += "INNER JOIN user U on U.id=P.user_id "
+		query += "INNER JOIN user U on E.user_id=U.id "
+		#query += "INNER JOIN user U on U.id=P.user_id "
 		query += "WHERE P.user_id=:c_id "
 		query += "AND P.paid='FALSE' "
-		query += "AND E.user_id = (SELECT id FROM user WHERE name=:user) "
+		query += "AND E.user_id = (SELECT U2.id FROM user U2 WHERE U2.name=:user) "
+		query += "AND not exists "
+		#SUSPEND TUPLE NOT PRESENT
+		query += "(SELECT * FROM pending P "
+		query += "WHERE P.master_id=U.id "
+		query += "AND P.debtor_id=P.user_id "
+		query += "AND P.expense_id=E.id) "
 		query += "ORDER BY E.data_reg DESC"
 
+		print(query)
+
 		#TODO check if table is empty
-		print(user_data)
+
 		count_row = "SELECT count(*) FROM ( "+ query + " )"
 		self.cursor.execute(count_row, {
 					"c_id": update.message.chat_id,
 					"user": user_data['user']
 				})
-
 		tot = self.cursor.fetchone()[0]
 
-		keyboard = []
 		self.cursor.execute(query, {
 				"c_id": update.message.chat_id,
 				"user": user_data['user']
 			}
 		)
-
+		keyboard = []
 		for i in range(0, tot):
 			row = self.cursor.fetchone()
 			part = row[0] + " " + str(row[1]) + "€ " + row[2]
@@ -401,7 +408,7 @@ class core:
 
 		update.callback_query.message.reply_text("Payment charged, pending confirmation by the creditor.", reply_markup=ReplyKeyboardRemove())
 		text = "Payment confirmation request by: @{}. Check action pending to confirm.".format(debtor)
-		bot.send_message(chat_id=int(row[1]), text = text)
+		bot.send_message(chat_id=int(send_to), text = text)
 
 		user_data.clear()
 		return ConversationHandler.END
