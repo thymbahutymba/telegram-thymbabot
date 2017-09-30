@@ -5,7 +5,7 @@ from sqlite3 import Error
 from prettytable import PrettyTable
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',level=logging.INFO, filename='thymbabot.log')
-CHOOSING, TAKE_DATA, TAKE_INFORMATION, SET_PAYMENT, USER_PAYMENT = range(5)
+CHOOSING, TAKE_DATA, TAKE_INFORMATION, SET_PAYMENT, USER_PAYMENT, REGISTER_PAYMENT = range(6)
 
 class core:
 	cfg = None
@@ -67,9 +67,9 @@ class core:
 		message_help += "/ping - ping the bot\n"
 		message_help += "/help - help command\n"
 		message_help += "/register - register your user\n"
-		message_help += "/insert - add some expense or pay something.\n"
-		message_help += "/total - total of your expense\n"
-		message_help += "/print - show something."
+		message_help += "/action - perform some action.\n"
+		message_help += "/total - total of your expense"
+		#message_help += "/print - show something."
 		bot.send_message(chat_id=update.message.chat_id, text=message_help)
 
 	def expense_command(self, bot, update, args):
@@ -146,13 +146,14 @@ class core:
 
 	def start(self):
 		insert_handler = ConversationHandler(
-			entry_points=[CommandHandler('insert', self.insert_command)],
+			entry_points=[CommandHandler('action', self.action_command)],
 			states={
 				CHOOSING: [RegexHandler('^(Expense|Payment)$', self.first_choice, pass_user_data=True)],
-				TAKE_INFORMATION: [RegexHandler('^(Price|Description|Debit)$', self.take_information, pass_user_data=True)],
+				TAKE_INFORMATION: [RegexHandler('^(Price|Description|Debtor)$', self.take_information, pass_user_data=True)],
 				TAKE_DATA: [MessageHandler(Filters.text, self.take_data, pass_user_data=True)],
 				SET_PAYMENT: [MessageHandler(Filters.text, self.set_payment, pass_user_data=True)],
-				USER_PAYMENT: [MessageHandler(Filters.text, self.user_payment, pass_user_data=True)]
+				USER_PAYMENT: [MessageHandler(Filters.text, self.user_payment, pass_user_data=True)],
+				REGISTER_PAYMENT: [CallbackQueryHandler(self.register_payment, pass_user_data=True)]
 				},
 			fallbacks = [RegexHandler('^(Submit|Cancel)$', self.end_action, pass_user_data=True)],
 		)
@@ -167,8 +168,8 @@ class core:
 			self.dispatcher.add_handler(CommandHandler('help', self.help_command))
 			self.dispatcher.add_handler(CommandHandler('register', self.register_command))
 			self.dispatcher.add_handler(CommandHandler('total', self.total_command))
-			self.dispatcher.add_handler(CommandHandler('print', self.print_command))
-			self.dispatcher.add_handler(CallbackQueryHandler(self.button))
+			#self.dispatcher.add_handler(CommandHandler('print', self.print_command))
+			#self.dispatcher.add_handler(CallbackQueryHandler(self.button))
 			self.dispatcher.add_handler(insert_handler)
 			self.updater.idle()
 		except Exception as ecc:
@@ -176,7 +177,7 @@ class core:
 			pass
 
 	def simple_2choice(self, user_data):
-		expense_keyboard = [['Price', 'Description'], ['Debit', 'Cancel', 'Submit']]
+		expense_keyboard = [['Price', 'Description'], ['Debtor', 'Cancel', 'Submit']]
 		markup = ReplyKeyboardMarkup(expense_keyboard, one_time_keyboard=True)
 		return markup
 
@@ -188,17 +189,16 @@ class core:
 			logging.error("Error: " + str(ecc))
 			return False
 
-	def insert_command(self, bot, update):
+	def action_command(self, bot, update):
 		if not self.check_register(bot, update):
 			return ConversationHandler.END
 		else:
-			action_keyboard = [['Expense', 'Payment'], ['Cancel']]
+			action_keyboard = [['Expense', 'Payment'], ['Pending\nComingSoon', 'Cancel']]
 			markup = ReplyKeyboardMarkup(action_keyboard, one_time_keyboard=True)
 			update.message.reply_text("Choice what you want to do.", reply_markup=markup)
 			return CHOOSING
 
 	def first_choice(self, bot, update, user_data):
-		print(update.message.text)
 		user_data['choice'] = update.message.text
 		if user_data['choice'] == 'Expense':
 			user_data['Price'] = None
@@ -208,23 +208,19 @@ class core:
 			update.message.reply_text(text, reply_markup=markup)
 			return TAKE_INFORMATION
 		else:
-			print("1")
 			markup = self.payment_keyboard(update.message.chat_id)
 			text = "Who did you pay?"
 			update.message.reply_text(text, reply_markup=markup)
 			return USER_PAYMENT
 
 	def payment_keyboard(self, c_id):
-		print("2")
 		query = "SELECT DISTINCT U.name "
-		query += "FROM payment P inner join expense E on P.expense_id=E.id "
-		query += "inner join user U on E.user_id=U.id "
-		query += "WHERE P.user_id={}".format(c_id)
-		print(query)
-		self.cursor.execute(query)
+		query += "FROM payment P INNER JOIN expense E on P.expense_id=E.id "
+		query += "INNER JOIN user U on E.user_id=U.id "
+		query += "WHERE P.user_id=?"
+		self.cursor.execute(query, (c_id))
 		user = []
 		for row in self.cursor:
-			print(row[0])
 			user.append(row[0])
 
 		#TODO back button
@@ -234,21 +230,19 @@ class core:
 		return markup
 
 	def user_keyboard(self, update, user_data):
-		query = "SELECT name FROM user"
-		#WHERE id<>{}".format(update.message.chat_id)
+		query = "SELECT name FROM user WHERE id<>:id"
 		user = []
-		self.cursor.execute(query)
+		self.cursor.execute(query, {"id": update.message.chat_id})
 		for row in self.cursor:
 			if row[0] not in user_data:
 				user.append(row[0])
-		print(user)
-		keyboard = [user, ['Back', 'Cancel', 'Submit']]
+
+		keyboard = [user, ['Back']]
 		markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
 		return markup
 
 	def take_information(self, bot, update, user_data):
-		if update.message.text == 'Debit':
-			#WHEN id<>{}".format(update.message.chat_id)
+		if update.message.text == 'Debtor':
 			markup = self.user_keyboard(update, user_data)
 			update.message.reply_text("Who should be charged these expenses?", reply_markup=markup)
 			return SET_PAYMENT
@@ -306,7 +300,7 @@ class core:
 			msg += "The user who will be charge the expese are:\n"
 			for row in user:
 				msg += "- " + str(row[0]) + "\n"
-			self.add_expense(bot, update, user_data['Price'], user_data['Description'], user)
+			self.add_expense(bot, update, round(user_data['Price'], 2), user_data['Description'], user)
 			update.message.reply_text(msg, reply_markup=ReplyKeyboardRemove())
 			user_data.clear()
 			return ConversationHandler.END
@@ -314,8 +308,8 @@ class core:
 	def add_expense(self, bot, update, price, desc, user):
 		try:
 			query = "INSERT INTO expense(price, description, data_reg, user_id)"
-			query += "values({}, '{}', CURRENT_DATE, {});".format(price, desc, update.message.chat_id)
-			self.cursor.execute(query)
+			query += "values(:price, ':desc', CURRENT_DATE, :c_id);"#.format(price, desc, update.message.chat_id)
+			self.cursor.execute(query, {"price": price, "desc": desc, "c_id": update.message.chat_id})
 			self.connect.commit()
 			logging.info("Insert into table expense from {}: {} {}.".format(update.message.chat_id, price, desc))
 			query2 = "SELECT LAST_INSERT_ROWID()"
@@ -329,13 +323,13 @@ class core:
 
 	def add_payment(self, e_id, price, user):
 		try:
-			own_price = float(float(price)/(len(user)+1))
+			own_price = round(float(float(price)/(len(user)+1)),2)
 			for row in user:
-				query = "SELECT id FROM user WHERE name='{}'".format(str(row[0]))
-				self.cursor.execute(query)
+				query = "SELECT id FROM user WHERE name=':name'"
+				self.cursor.execute(query, {"name": str(row[0])})
 				c_id = int(self.cursor.fetchone()[0])
-				query2 = "INSERT INTO payment(expense_id, user_id, import) values({}, {}, {})".format(e_id, c_id, own_price)
-				self.cursor.execute(query2)
+				query2 = "INSERT INTO payment(expense_id, user_id, import) values(:e_id, :c_id, :price)"
+				self.cursor.execute(query2, {"e_id": e_id,"c_id": c_id,"price": own_price})
 				self.connect.commit()
 			logging.info("Insert into table payment completed.")
 		except Exception as e:
@@ -345,36 +339,69 @@ class core:
 
 	def user_payment(self, bot, update, user_data):
 		user_data['user']=update.message.text
-		query = "SELECT E.data_reg as Data, P.import as Import, E.description as Description "
-		query += "FROM payment P inner join expense E on P.expense_id=E.id "
-		query += "inner join user U on U.id=P.user_id "
-		query += "WHERE U.name='{}' ".format(user_data['user'])
-		query += "AND E.user_id={} ".format(update.message.chat_id)
-		query += "AND P.paid='false' "
+		query = "SELECT E.data_reg as Data, round(P.import, 2) as Import, E.description as Description, P.user_id, P.expense_id "
+		query += "FROM payment P INNER JOIN expense E on P.expense_id=E.id "
+		query += "INNER JOIN user U on U.id=P.user_id "
+		query += "WHERE P.user_id=:c_id "
+		query += "AND P.paid='FALSE' "
+		query += "AND E.user_id = (SELECT id FROM user WHERE name=:user) "
 		query += "ORDER BY E.data_reg DESC"
-		print(query)
-		self.cursor.execute(query)
-
-		#DEBUG MESSAGE
-
-		table = PrettyTable(['Data', 'Import', 'Description'])
-		for row in self.cursor.fetchall():
-			table.add_row(row)
-		s = "Payments due by {} are:".format(user_data['user'])
-		s+="```\n"
-		s+=table.get_string()
-		s+="```"
-		print(s)
-		bot.send_message(chat_id=update.message.chat_id, text=s, parse_mode='MARKDOWN')
 
 		#TODO check if table is empty
+		print(user_data)
+		count_row = "SELECT count(*) FROM ( "+ query + " )"
+		self.cursor.execute(count_row, {
+					"c_id": update.message.chat_id,
+					"user": user_data['user']
+				})
 
-		self.cursor.execute(query)
-		payment = []
-		for row in self.cursor:
-			payment.add_row(row)
-		keyboard = [payment, ['Cancel']]
-		markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
-		update.message.reply_text("Which payment you want update?", reply_markup=markup)
-		#return SOME
+		tot = self.cursor.fetchone()[0]
+
+		keyboard = []
+		self.cursor.execute(query, {
+				"c_id": update.message.chat_id,
+				"user": user_data['user']
+			}
+		)
+
+		for i in range(0, tot):
+			row = self.cursor.fetchone()
+			part = row[0] + " " + str(row[1]) + "€ " + row[2]
+			send = str(row[3]) + " " + str(row[4])
+			keyboard += [[InlineKeyboardButton(part, callback_data=send)]]
+		reply_markup = InlineKeyboardMarkup(keyboard)
+		text = "Choose the payment that you made to {}.".format(user_data['user'])
+		update.message.reply_text(text, reply_markup=reply_markup)
+		return REGISTER_PAYMENT
+
+	def register_payment(self, bot, update, user_data):
+		s = update.callback_query.data.split(" ", 1)
+		update.callback_query.message.delete()
+
+		user_id = int(s[0])
+		expense_id = int(s[1])
+		query = "SELECT U.id "
+		query += "FROM expense E INNER JOIN user U on E.user_id=U.id "
+		query += "WHERE E.id=:e_id "
+		query += "LIMIT 1"
+
+		self.cursor.execute(query, {"e_id": expense_id})
+		send_to = self.cursor.fetchone()[0]
+		try:
+			query = "INSERT INTO pending(master_id, debtor_id, expense_id) VALUES(?,?,?)"
+			self.cursor.execute(query, (int(send_to), user_id, expense_id))
+			self.connect.commit()
+			logging.info("There is a new pending payment waiting to be accepted.")
+		except Exception as e:
+			logging.info("Insert into pending failed")
+
+		query = "SELECT name FROM user WHERE id=:user_id"
+		self.cursor.execute(query, {"user_id": user_id})
+		debtor= self.cursor.fetchone()[0]
+
+		update.callback_query.message.reply_text("Payment charged, pending confirmation by the creditor.", reply_markup=ReplyKeyboardRemove())
+		text = "Payment confirmation request by: @{}. Check action pending to confirm.".format(debtor)
+		bot.send_message(chat_id=int(row[1]), text = text)
+
+		user_data.clear()
 		return ConversationHandler.END

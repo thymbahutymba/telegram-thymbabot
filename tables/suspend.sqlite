@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS suspend(
+	master_id integer NOT NULL,
+	debtor_id integer NOT NULL,
+  expense_id integer NOT NULL,
+  PRIMARY KEY (master_id, debtor_id, expense_id)
+	FOREIGN KEY (master_id) REFERENCES users(id)
+  FOREIGN KEY (debtor_id) REFERENCES payment(user_id)
+  FOREIGN KEY (expense_id) REFERENCES payment(expense_id)
+);
